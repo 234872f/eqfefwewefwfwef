@@ -1,634 +1,148 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>Word Guess</title>
+    <meta charset="UTF-8">
+    <title>JS Voxel Engine</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%;
+            width: 20px; height: 20px;
+            border: 2px solid white; border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        #instructions {
+            position: absolute; top: 10px; left: 10px;
+            color: white; font-family: sans-serif;
+            background: rgba(0,0,0,0.5); padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="crosshair"></div>
+    <div id="instructions">
+        WASD to Move | Space to Jump | Click to Add | Shift+Click to Remove
+    </div>
 
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-12KRFCZR86"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-12KRFCZR86');
-</script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
-<style>
-:root{
- --bg:#050b1a;
- --panel:#0b1630;
- --card:#0f1f45;
- --text:#e8f0ff;
- --muted:#8fa6ff;
- --accent:#3b82f6;
- --accent-soft:#60a5fa;
- --danger:#fb7185;
- --success:#34d399;
- --warning:#f59e0b;
-}
+        // --- Setup Scene ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
 
-*{box-sizing:border-box}
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        sunLight.position.set(10, 20, 10);
+        scene.add(sunLight);
 
-body{
- margin:0;
- min-height:100vh;
- font-family:system-ui,-apple-system,Segoe UI,sans-serif;
- background:radial-gradient(1000px 600px at top, var(--panel), var(--bg));
- color:var(--text);
- overflow-x:hidden;
- transition: background 0.8s ease; /* Smooth transition for the random theme */
-}
+        // --- Controls ---
+        const controls = new PointerLockControls(camera, document.body);
+        document.addEventListener('click', () => controls.lock());
 
-/* ANIMATIONS */
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-@keyframes slideUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
-@keyframes pop{0%{opacity:0;transform:scale(.6)}15%{opacity:1;transform:scale(1.1)}85%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.05)}}
-@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-10px)}75%{transform:translateX(10px)}}
-@keyframes glow{0%,100%{box-shadow:0 0 20px rgba(52,211,153,.4)}50%{box-shadow:0 0 40px rgba(52,211,153,.8)}}
-@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
-@keyframes confettiFall{to{transform:translateY(100vh) rotate(360deg);opacity:0}}
+        // --- World Generation ---
+        const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+        const grassMat = new THREE.MeshLambertMaterial({ color: 0x4d903e });
+        const objects = [];
 
-button{transition:all .3s cubic-bezier(.4,0,.2,1);}
-button:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.1);}
-button:active:not(:disabled){transform:translateY(0);}
+        for (let x = -10; x < 10; x++) {
+            for (let z = -10; z < 10; z++) {
+                const mesh = new THREE.Mesh(boxGeo, grassMat);
+                mesh.position.set(x, 0, z);
+                scene.add(mesh);
+                objects.push(mesh);
+            }
+        }
 
-.start{
- position:fixed;
- inset:0;
- display:flex;
- flex-direction:column;
- align-items:center;
- justify-content:center;
- gap:26px;
- background:radial-gradient(900px 500px at center, var(--panel), var(--bg));
-}
+        camera.position.y = 2;
 
-.start h1{
- font-size:68px;
- letter-spacing:.2em;
- animation:pulse 2s ease-in-out infinite;
-}
+        // --- Interaction (Add/Remove) ---
+        const raycaster = new THREE.Raycaster();
+        window.addEventListener('mousedown', (e) => {
+            if (!controls.isLocked) return;
 
-.start p{max-width:560px;text-align:center;color:var(--muted);font-size:18px;}
-.start button{padding:18px 66px;font-size:22px;border:none;border-radius:999px;cursor:pointer;font-weight:800;}
-#startPlayBtn{background:linear-gradient(135deg,var(--accent),var(--accent-soft));color:white;}
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(objects);
 
-.google-signin{
- padding:18px 66px;
- background:linear-gradient(135deg,var(--accent),var(--accent-soft));
- color:white;
- border:none;
- border-radius:999px;
- font-size:18px;
- font-weight:800;
- cursor:pointer;
- display:flex;
- align-items:center;
- gap:10px;
- box-shadow:0 8px 24px rgba(0,0,0,.4);
-}
-/* ... remaining CSS continues in Part 2 ... */
-  /* ==========================================
-   PART 2: AUTH & DATA PERSISTENCE (Firebase)
-   ========================================== */
-
-// Global User State
-let currentUser = null;
-let userDocRef = null;
-
-// Auth Handler
-async function handleAuth() {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    try {
-        const result = await auth.signInWithPopup(provider);
-        currentUser = result.user;
-        setupUserSession(currentUser);
-    } catch (error) {
-        console.error("Auth Error:", error);
-        alert("Authentication failed. Please try again.");
-    }
-}
-
-// Session Setup & Firestore Sync
-async function setupUserSession(user) {
-    userDocRef = db.collection('users').doc(user.uid);
-    
-    const doc = await userDocRef.get();
-    if (!doc.exists()) {
-        // Initialize New User Data
-        const initialData = {
-            points: 0,
-            streak: 0,
-            maxStreak: 0,
-            tier: 1,
-            inventory: {},
-            unlockedAchievements: [],
-            lastDailyReward: null,
-            displayName: user.displayName
-        };
-        await userDocRef.set(initialData);
-        loadUserData(initialData);
-    } else {
-        loadUserData(doc.data());
-    }
-
-    // UI Transitions
-    document.getElementById('authBtn').style.display = 'none';
-    document.getElementById('startPlayBtn').style.display = 'block';
-    document.getElementById('signoutBtn').style.display = 'block';
-    document.getElementById('hostBtn').style.display = 'block';
-    document.getElementById('joinBtn').style.display = 'block';
-    
-    // Check for Daily Rewards
-    checkDailyReward();
-}
-
-// Data Mapping to Game Variables
-function loadUserData(data) {
-    totalPoints = data.points || 0;
-    currentStreak = data.streak || 0;
-    currentTier = data.tier || 1;
-    userInventory = data.inventory || {};
-    
-    updateTierUI();
-    document.getElementById('totalPoints').innerText = totalPoints;
-    document.getElementById('streakDisplay').innerText = currentStreak;
-}
-
-// Tier Progression Calculation
-const TIER_THRESHOLDS = [0, 500, 1500, 5000, 15000, 50000];
-const TIER_NAMES = ["BRONZE 1", "SILVER 1", "GOLD 1", "PLATINUM 1", "DIAMOND 1", "ELITE"];
-
-function updateTierUI() {
-    const nextThreshold = TIER_THRESHOLDS[currentTier] || TIER_THRESHOLDS[TIER_THRESHOLDS.length - 1];
-    const prevThreshold = TIER_THRESHOLDS[currentTier - 1];
-    const progress = ((totalPoints - prevThreshold) / (nextThreshold - prevThreshold)) * 100;
-
-    document.getElementById('tierName').innerText = TIER_NAMES[currentTier - 1];
-    document.getElementById('tierFill').style.width = Math.min(progress, 100) + "%";
-    
-    // Update Badge (Placeholder logic for your specific badge images)
-    const badgeImg = document.getElementById('tierBadge');
-    if (currentTier === 1) badgeImg.src = "https://i.imgur.com/your-bronze-icon.png";
-    if (currentTier === 2) badgeImg.src = "https://i.imgur.com/your-silver-icon.png";
-}
-
-// Periodic Sync to Cloud
-async function syncData() {
-    if (!userDocRef) return;
-    try {
-        await userDocRef.update({
-            points: totalPoints,
-            streak: currentStreak,
-            tier: currentTier,
-            inventory: userInventory
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                
+                if (e.shiftKey) { // Remove block
+                    scene.remove(intersect.object);
+                    objects.splice(objects.indexOf(intersect.object), 1);
+                } else { // Add block
+                    const newBlock = new THREE.Mesh(boxGeo, grassMat);
+                    newBlock.position.copy(intersect.object.position).add(intersect.face.normal);
+                    scene.add(newBlock);
+                    objects.push(newBlock);
+                }
+            }
         });
-    } catch (e) {
-        console.warn("Sync failed, retrying on next action...");
-    }
-}
 
-function signOut() {
-    auth.signOut().then(() => {
-        location.reload();
-    });
-}
-/* ==========================================
-   PART 3: CORE GAME ENGINE & CONSTRAINTS
-   ========================================== */
+        // --- Movement Logic ---
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
 
-let currentPuzzle = null;
-let guesses = [];
-let maxGuesses = 5;
-let usedHint = false;
-let activePowers = {
-    timedMode: false,
-    doublePoints: false
-};
+        const onKeyDown = (e) => {
+            switch (e.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyD': moveRight = true; break;
+            }
+        };
+        const onKeyUp = (e) => {
+            switch (e.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyD': moveRight = false; break;
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
 
-// --- PUZZLE INITIALIZATION ---
-function nextPuzzle() {
-    // Reset state
-    guesses = [];
-    guessesLeft = maxGuesses;
-    usedHint = false;
-    document.getElementById('message').innerText = "";
-    document.getElementById('guessHistory').innerHTML = "";
-    document.getElementById('guess').value = "";
-    document.getElementById('guess').disabled = false;
-    
-    // Select random word from your massive database
-    const categoryKeys = Object.keys(wordDatabase);
-    const randomCat = categoryKeys[Math.floor(Math.random() * categoryKeys.length)];
-    const wordPool = wordDatabase[randomCat];
-    const selection = wordPool[Math.floor(Math.random() * wordPool.length)];
-    
-    currentPuzzle = {
-        word: selection.word.toUpperCase(),
-        clue: selection.clue,
-        category: randomCat,
-        constraints: generateConstraints(selection.word.toUpperCase())
-    };
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
 
-    renderPuzzle();
-    updateStreakPowers();
-}
+            if (controls.isLocked) {
+                const delta = 0.1;
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
 
-// --- CONSTRAINT GENERATOR ---
-// This builds the "Rules" (e.g., Must contain 'A', Cannot have 'E')
-function generateConstraints(word) {
-    const letters = word.split('');
-    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split('');
-    const notInWord = alphabet.filter(l => !letters.includes(l));
-    
-    let rules = [];
-    
-    // Rule 1: Length
-    rules.push(`Must be exactly ${word.length} letters long.`);
-    
-    // Rule 2: Included letter
-    const mustHave = letters[Math.floor(Math.random() * letters.length)];
-    rules.push(`Must contain the letter '${mustHave}'.`);
-    
-    // Rule 3: Excluded letter
-    const mustNotHave = notInWord[Math.floor(Math.random() * notInWord.length)];
-    rules.push(`Cannot contain the letter '${mustNotHave}'.`);
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize();
 
-    return rules;
-}
+                if (moveForward || moveBackward) velocity.z -= direction.z * 40.0 * delta;
+                if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
 
-function renderPuzzle() {
-    document.getElementById('currentCategoryDisplay').innerText = currentPuzzle.category;
-    document.getElementById('clue').innerText = `CLUE: ${currentPuzzle.clue}`;
-    
-    const constraintDiv = document.getElementById('constraints');
-    constraintDiv.innerHTML = currentPuzzle.constraints.map(c => `<div>• ${c}</div>`).join('');
-    
-    document.getElementById('counter').innerText = `Guesses left: ${guessesLeft}`;
-}
+                controls.moveRight(-velocity.x * delta);
+                controls.moveForward(-velocity.z * delta);
+            }
 
-// --- GUESS VALIDATION ---
-function submitGuess() {
-    const input = document.getElementById('guess');
-    const val = input.value.toUpperCase().trim();
-    
-    if (!val || val.length === 0) return;
-
-    // Check Constraints
-    if (val.length !== currentPuzzle.word.length) {
-        showMessage("Wrong length!", "var(--danger)");
-        shakeCard();
-        return;
-    }
-
-    // Process Guess
-    processGuessResult(val);
-    input.value = "";
-}
-
-function processGuessResult(guess) {
-    const target = currentPuzzle.word;
-    const resultArr = []; // 0: wrong, 1: wrong pos, 2: correct
-
-    if (guess === target) {
-        handleWin();
-    } else {
-        guessesLeft--;
-        document.getElementById('counter').innerText = `Guesses left: ${guessesLeft}`;
-        addToHistory(guess);
-        
-        if (guessesLeft <= 0) {
-            handleLoss();
-        } else {
-            showMessage("Incorrect. Keep trying!", "var(--muted)");
-            shakeCard();
+            renderer.render(scene, camera);
         }
-    }
-}
-
-// --- HINT SYSTEM ---
-function getHint() {
-    if (totalPoints < 50) {
-        showMessage("Need 50 points for a hint!", "var(--warning)");
-        return;
-    }
-    
-    if (!usedHint) {
-        totalPoints -= 50;
-        usedHint = true;
-        const target = currentPuzzle.word;
-        const firstLetter = target[0];
-        const lastLetter = target[target.length - 1];
-        
-        showMessage(`HINT: Starts with ${firstLetter} and ends with ${lastLetter}`, "var(--accent-soft)");
-        document.getElementById('totalPoints').innerText = totalPoints;
-        syncData();
-    }
-}
-
-// --- STREAK POWER LOGIC ---
-function updateStreakPowers() {
-    const p3 = document.getElementById('powerBtn3');
-    const p5 = document.getElementById('powerBtn5');
-    const p10 = document.getElementById('powerBtn10');
-
-    // Unlock based on current session streak
-    if (currentStreak >= 3) { p3.disabled = false; p3.classList.add('unlocked'); }
-    if (currentStreak >= 5) { p5.disabled = false; p5.classList.add('unlocked'); }
-    if (currentStreak >= 10) { p10.disabled = false; p10.classList.add('unlocked'); }
-}
-
-function shakeCard() {
-    const card = document.getElementById('puzzleCard');
-    card.classList.add('shake');
-    setTimeout(() => card.classList.remove('shake'), 500);
-}
-
-function showMessage(txt, color) {
-    const m = document.getElementById('message');
-    m.innerText = txt;
-    m.style.color = color;
-}
-/* ==========================================
-   PART 3: CORE GAME ENGINE & CONSTRAINTS
-   ========================================== */
-
-let currentPuzzle = null;
-let guesses = [];
-let maxGuesses = 5;
-let usedHint = false;
-let activePowers = {
-    timedMode: false,
-    doublePoints: false
-};
-
-// --- PUZZLE INITIALIZATION ---
-function nextPuzzle() {
-    // Reset state
-    guesses = [];
-    guessesLeft = maxGuesses;
-    usedHint = false;
-    document.getElementById('message').innerText = "";
-    document.getElementById('guessHistory').innerHTML = "";
-    document.getElementById('guess').value = "";
-    document.getElementById('guess').disabled = false;
-    
-    // Select random word from your massive database
-    const categoryKeys = Object.keys(wordDatabase);
-    const randomCat = categoryKeys[Math.floor(Math.random() * categoryKeys.length)];
-    const wordPool = wordDatabase[randomCat];
-    const selection = wordPool[Math.floor(Math.random() * wordPool.length)];
-    
-    currentPuzzle = {
-        word: selection.word.toUpperCase(),
-        clue: selection.clue,
-        category: randomCat,
-        constraints: generateConstraints(selection.word.toUpperCase())
-    };
-
-    renderPuzzle();
-    updateStreakPowers();
-}
-
-// --- CONSTRAINT GENERATOR ---
-// This builds the "Rules" (e.g., Must contain 'A', Cannot have 'E')
-function generateConstraints(word) {
-    const letters = word.split('');
-    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split('');
-    const notInWord = alphabet.filter(l => !letters.includes(l));
-    
-    let rules = [];
-    
-    // Rule 1: Length
-    rules.push(`Must be exactly ${word.length} letters long.`);
-    
-    // Rule 2: Included letter
-    const mustHave = letters[Math.floor(Math.random() * letters.length)];
-    rules.push(`Must contain the letter '${mustHave}'.`);
-    
-    // Rule 3: Excluded letter
-    const mustNotHave = notInWord[Math.floor(Math.random() * notInWord.length)];
-    rules.push(`Cannot contain the letter '${mustNotHave}'.`);
-
-    return rules;
-}
-
-function renderPuzzle() {
-    document.getElementById('currentCategoryDisplay').innerText = currentPuzzle.category;
-    document.getElementById('clue').innerText = `CLUE: ${currentPuzzle.clue}`;
-    
-    const constraintDiv = document.getElementById('constraints');
-    constraintDiv.innerHTML = currentPuzzle.constraints.map(c => `<div>• ${c}</div>`).join('');
-    
-    document.getElementById('counter').innerText = `Guesses left: ${guessesLeft}`;
-}
-
-// --- GUESS VALIDATION ---
-function submitGuess() {
-    const input = document.getElementById('guess');
-    const val = input.value.toUpperCase().trim();
-    
-    if (!val || val.length === 0) return;
-
-    // Check Constraints
-    if (val.length !== currentPuzzle.word.length) {
-        showMessage("Wrong length!", "var(--danger)");
-        shakeCard();
-        return;
-    }
-
-    // Process Guess
-    processGuessResult(val);
-    input.value = "";
-}
-
-function processGuessResult(guess) {
-    const target = currentPuzzle.word;
-    const resultArr = []; // 0: wrong, 1: wrong pos, 2: correct
-
-    if (guess === target) {
-        handleWin();
-    } else {
-        guessesLeft--;
-        document.getElementById('counter').innerText = `Guesses left: ${guessesLeft}`;
-        addToHistory(guess);
-        
-        if (guessesLeft <= 0) {
-            handleLoss();
-        } else {
-            showMessage("Incorrect. Keep trying!", "var(--muted)");
-            shakeCard();
-        }
-    }
-}
-
-// --- HINT SYSTEM ---
-function getHint() {
-    if (totalPoints < 50) {
-        showMessage("Need 50 points for a hint!", "var(--warning)");
-        return;
-    }
-    
-    if (!usedHint) {
-        totalPoints -= 50;
-        usedHint = true;
-        const target = currentPuzzle.word;
-        const firstLetter = target[0];
-        const lastLetter = target[target.length - 1];
-        
-        showMessage(`HINT: Starts with ${firstLetter} and ends with ${lastLetter}`, "var(--accent-soft)");
-        document.getElementById('totalPoints').innerText = totalPoints;
-        syncData();
-    }
-}
-
-// --- STREAK POWER LOGIC ---
-function updateStreakPowers() {
-    const p3 = document.getElementById('powerBtn3');
-    const p5 = document.getElementById('powerBtn5');
-    const p10 = document.getElementById('powerBtn10');
-
-    // Unlock based on current session streak
-    if (currentStreak >= 3) { p3.disabled = false; p3.classList.add('unlocked'); }
-    if (currentStreak >= 5) { p5.disabled = false; p5.classList.add('unlocked'); }
-    if (currentStreak >= 10) { p10.disabled = false; p10.classList.add('unlocked'); }
-}
-
-function shakeCard() {
-    const card = document.getElementById('puzzleCard');
-    card.classList.add('shake');
-    setTimeout(() => card.classList.remove('shake'), 500);
-}
-
-function showMessage(txt, color) {
-    const m = document.getElementById('message');
-    m.innerText = txt;
-    m.style.color = color;
-}
-/* ==========================================
-   PART 5: SHOP, ACHIEVEMENTS & TOURNAMENTS
-   ========================================== */
-
-// --- SHOP SYSTEM ---
-const SHOP_ITEMS = [
-    { id: 'extra_guess', name: 'Extra Guess', price: 200, desc: 'Permanent +1 guess per round' },
-    { id: 'double_points', name: 'Point Booster', price: 1000, desc: '2x points for the next 5 rounds' },
-    { id: 'skip_word', name: 'Word Skip', price: 500, desc: 'Skip a word without losing your streak' }
-];
-
-function openShop() {
-    const modal = document.createElement('div');
-    modal.className = 'modal active';
-    modal.id = 'shopModal';
-    
-    let shopHTML = `
-        <div class="modal-container">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2>STORE</h2>
-                <button onclick="closeModal('shopModal')" style="background:none; color:var(--text); font-size:24px; cursor:pointer;">&times;</button>
-            </div>
-            <p style="color:var(--muted)">Balance: <span style="color:var(--success)">${totalPoints}</span> Points</p>
-            <div style="display:grid; gap:15px; margin-top:20px;">
-    `;
-
-    SHOP_ITEMS.forEach(item => {
-        shopHTML += `
-            <div class="card" style="display:flex; justify-content:space-between; align-items:center; padding:20px;">
-                <div>
-                    <div style="font-weight:900;">${item.name}</div>
-                    <div style="font-size:12px; color:var(--muted)">${item.desc}</div>
-                </div>
-                <button onclick="buyItem('${item.id}', ${item.price})" class="submit" style="width:auto; margin:0; padding:10px 20px;">
-                    ${item.price} pts
-                </button>
-            </div>
-        `;
-    });
-
-    shopHTML += `</div></div>`;
-    modal.innerHTML = shopHTML;
-    document.body.appendChild(modal);
-}
-
-async function buyItem(id, price) {
-    if (totalPoints < price) {
-        alert("Insufficient points!");
-        return;
-    }
-
-    totalPoints -= price;
-    userInventory[id] = (userInventory[id] || 0) + 1;
-    
-    // Apply permanent upgrades immediately
-    if (id === 'extra_guess') maxGuesses++;
-    
-    document.getElementById('totalPoints').innerText = totalPoints;
-    syncData();
-    alert("Purchase successful!");
-}
-
-// --- ACHIEVEMENT TRACKER ---
-const ACHIEVEMENTS = [
-    { id: 'first_win', name: 'First Blood', desc: 'Solve your first word', requirement: () => totalPoints >= 100 },
-    { id: 'streak_master', name: 'Hot Streak', desc: 'Reach a 10-word streak', requirement: () => maxStreak >= 10 },
-    { id: 'rich', name: 'Tycoon', desc: 'Accumulate 10,000 points', requirement: () => totalPoints >= 10000 }
-];
-
-function openAchievements() {
-    const modal = document.createElement('div');
-    modal.className = 'modal active';
-    modal.id = 'achieveModal';
-    
-    let html = `<div class="modal-container">
-        <h2>ACHIEVEMENTS</h2>
-        <div style="display:grid; gap:10px; margin-top:20px;">`;
-
-    ACHIEVEMENTS.forEach(ach => {
-        const isUnlocked = ach.requirement();
-        html += `
-            <div class="card" style="opacity: ${isUnlocked ? 1 : 0.4}; border: 1px solid ${isUnlocked ? 'var(--success)' : 'transparent'}">
-                <div style="font-weight:900">${ach.name} ${isUnlocked ? '✅' : '🔒'}</div>
-                <div style="font-size:12px">${ach.desc}</div>
-            </div>
-        `;
-    });
-
-    html += `</div><button class="submit" onclick="closeModal('achieveModal')">Close</button></div>`;
-    modal.innerHTML = html;
-    document.body.appendChild(modal);
-}
-
-// --- UTILITIES & LISTENERS ---
-function closeModal(id) {
-    const m = document.getElementById(id);
-    if(m) m.remove();
-}
-
-// Keyboard Support
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        const activeModal = document.querySelector('.modal');
-        if (!activeModal && document.getElementById('game').style.display === 'block') {
-            submitGuess();
-        }
-    }
-});
-
-// Initialization on Window Load
-window.onload = () => {
-    // If auth is already cached by Firebase
-    auth.onAuthStateChanged(user => {
-        if (user) {
-            setupUserSession(user);
-        } else {
-            document.getElementById('authBtn').style.display = 'flex';
-        }
-    });
-};
-
-</script>
+        animate();
+    </script>
 </body>
 </html>
